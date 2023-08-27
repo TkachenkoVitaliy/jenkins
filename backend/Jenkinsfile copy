@@ -1,0 +1,46 @@
+def remote = [:]
+remote.name = 'ztv-de'
+remote.host = '89.23.106.12'
+remote.allowAnyHosts = true
+
+pipeline {
+    agent any
+    tools {
+        maven 'Maven 3.9.4'
+        jdk 'Java17'
+    }
+    stages {
+        stage ('Fetch sources') {
+            steps {
+                script {
+                    if (fileExists('assistant')) {
+                        sh 'cd assistant && git pull'
+                    } else {
+                        sh 'git clone https://github.com/TkachenkoVitaliy/assistant.git'
+                    }
+                }
+            }
+        }
+
+        stage ('Build') {
+            steps {
+                sh 'cd assistant && mvn -s $MAVEN_HOME/conf/settings-git.xml clean install -DskipTests'
+                sh 'mkdir /result'
+                sh 'mv assistant/target/assistant-*.jar assistant.jar'
+            }
+        }
+
+        agent {
+            node {
+                withCredentials([sshUserPrivateKey(credentialsId: '1804b215-19f9-4cdf-a1d7-f55ecf6179f4', keyFileVariable: 'identity', passphraseVariable: '', usernameVariable: 'userName')]) {
+                    
+                    remote.user = userName
+                    remote.identityFile = identity
+                    stage('Deploy to Remote Server') {
+                        sshPut remote: remote, from: 'assistant.jar', into: 'app/back'
+                    }
+                }
+            }
+        }
+    }
+}

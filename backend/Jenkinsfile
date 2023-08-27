@@ -5,9 +5,36 @@ pipeline {
         jdk 'Java17'
     }
     stages {
+        stage ('Fetch sources') {
+            steps {
+                script {
+                    if (fileExists('assistant')) {
+                        sh 'cd assistant && git pull'
+                    } else {
+                        sh 'git clone https://github.com/TkachenkoVitaliy/assistant.git'
+                    }
+                }
+            }
+        }
+
         stage ('Build') {
             steps {
-                sh 'mvn clean install'
+                sh 'cd assistant && mvn -s $MAVEN_HOME/conf/settings-git.xml clean install -DskipTests'
+                sh 'mv assistant/target/assistant-*.jar assistant/target/assistant.jar'
+            }
+        }
+
+        stage ('Deploy') {
+            steps {
+                sshagent(['1804b215-19f9-4cdf-a1d7-f55ecf6179f4']) {
+                    sh '''
+                        [ -d ~/.ssh ] || mkdir ~/.ssh && chmod 0700 ~/.ssh
+                        ssh-keyscan -H 89.23.106.12 >> ~/.ssh/known_hosts
+                    '''
+                    sh 'scp assistant/target/assistant.jar root@89.23.106.12:app/back/assistant.jar'
+                    sh 'scp assistant/JenkinsDockerfile root@89.23.106.12:app/back/JenkinsDockerfile'
+                    sh "ssh root@89.23.106.12 'cd app/back && docker build -t backend -f JenkinsDockerfile . && docker run -d -it -p 8089:8089 --restart always --name back backend && docker network inspect dockernet >/dev/null 2>&1 || docker network create --driver bridge dockernet && docker network connect dockernet backend'"
+                }
             }
         }
     }
